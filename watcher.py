@@ -17,6 +17,15 @@ POLL=60
 CONFIRM=2            # consecutive polls a session must need the user before we call (avoids flaps)
 RETRY_AFTER=15*60    # unanswered / unresolved items get re-called after this
 MAX_TRIES=3          # per item, then give up until the item changes
+SAME_ASK_H=6         # a reworded summary of the same kind of ask within this many hours counts as the same item
+
+def same_ask(prev,it,now=None):
+    """Is this the item we already called about? Same fingerprint, or the same kind of ask for the same agent whose
+    wording the summariser changed (e.g. 'Pick an icon set' -> 'Pick one or two icon sets') within SAME_ASK_H."""
+    if not prev:return False
+    if prev.get('fp')==it['fp']:return True
+    now=now or time.time()
+    return (prev.get('fp') or '').split(':')[0]==it['fp'].split(':')[0] and now-prev.get('last',0)<SAME_ASK_H*3600 and 'tries' in prev
 LIMIT_NUDGED={}            # session id -> when we last told it to carry on after a usage limit
 ENGAGED_S=30*60       # no calls about an agent the user messaged this recently
 TRIAGE_TIMEOUT=5*60  # coordinator gets this long to resolve an item before we phone anyway
@@ -318,7 +327,7 @@ def write_needs(cur,st,now,paused):
         prev=st['items'].get(sid) or {}
         if prev.get('fp')==it['fp'] and prev.get('resolved'):continue
         d={}
-        if prev.get('fp')==it['fp'] and prev.get('tries',0)>=MAX_TRIES:call_at=None
+        if same_ask(prev,it) and prev.get('tries',0)>=MAX_TRIES:call_at=None
         else:
             d=decision(sid,it['fp']);t=(st.get('triage') or {}).get(sid) or {}
             if d.get('action')=='call':call_at=now+POLL
@@ -419,8 +428,8 @@ def main():
                 s=st['streak'].get(sid) or {'fp':it['fp'],'n':0}
                 s={'fp':it['fp'],'n':s['n']+1 if s['fp']==it['fp'] else 1};st['streak'][sid]=s
                 prev=st['items'].get(sid) or {}
-                if prev.get('fp')!=it['fp']:prev={}
-                if s['n']<CONFIRM or prev.get('resolved'):continue
+                if not same_ask(prev,it,now):prev={}
+                if s['n']<CONFIRM or (prev.get('resolved') and prev.get('fp')==it['fp']):continue
                 d=decision(sid,it['fp'])
                 # an explicit "call me now" skips the retry wait and the retry limit
                 if not (d.get('action')=='call' and d.get('now') and d.get('at',0)>prev.get('last',0)):
@@ -454,7 +463,7 @@ def main():
                 st.pop('held',None)
                 for it in due:
                     p=st['items'].get(it['sid']) or {}
-                    st['items'][it['sid']]=dict(fp=it['fp'],tries=(p.get('tries',0) if p.get('fp')==it['fp'] else 0)+1,last=now)
+                    st['items'][it['sid']]=dict(fp=it['fp'],tries=(p.get('tries',0) if same_ask(p,it,now) else 0)+1,last=now)
                 save_state(st);run_call(due,st)
             save_state(st)
         except Exception as e:log('loop error',repr(e))

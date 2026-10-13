@@ -33,4 +33,4 @@ voice/.venv/
 voice/models/
 voice/recordings/
 menubar/.build/
-peers/
+/peers/

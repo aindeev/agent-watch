@@ -17,7 +17,7 @@ PORT = 8766
 MODEL = config.ENV.get("REALTIME_MODEL", "gpt-realtime-2.1")
 VOICE = config.ENV.get("REALTIME_VOICE", "marin")
 LOG = os.path.join(HERE, "bridge.log")
-SESSIONS, STATE = {}, {"tunnel": None}
+SESSIONS, STATE = {}, {"tunnel": None, "reachable": False, "proc": None}
 ULAW_BYTES_PER_MS = 8                           # 8 kHz, one byte per sample
 BARGE_IN_S = 0.4         # the caller must keep talking this long over the agent before it stops (noise and "mm-hmm" don't)
 DEBUG = bool(config.ENV.get("VOICE_DEBUG") or os.environ.get("VOICE_DEBUG"))
@@ -87,6 +87,7 @@ class Call:
         self.tel = None                 # Telnyx media WebSocket
         self.oai = None                 # OpenAI realtime WebSocket
         self.status = "dialing"
+        self.created = time.time()
         self.transcript, self.answers = [], []
         self.item_id, self.item_sent_ms, self.item_started = None, 0, 0.0   # the agent audio item being played
         self.play_until = 0.0
@@ -331,7 +332,33 @@ async def result(request):
 
 
 async def health(request):
-    return web.json_response({"ok": STATE["tunnel"] is not None, "tunnel": STATE["tunnel"], "model": MODEL})
+    # ok only when Telnyx can actually reach us: a quick tunnel can die (e.g. after a network drop) while this
+    # process keeps running, and calls placed then ring with no audio and no webhooks
+    ok = STATE["tunnel"] is not None and STATE["reachable"]
+    return web.json_response({"ok": ok, "tunnel": STATE["tunnel"], "reachable": STATE["reachable"], "model": MODEL})
+
+
+async def watch_tunnel(app):
+    """Checks the public tunnel every minute; after 3 failures in a row (and no call in progress) starts a new one."""
+    async def loop():
+        fails = 0
+        async with aiohttp.ClientSession() as http:
+            while True:
+                try:
+                    async with http.get(f"{STATE['tunnel']}/health", timeout=aiohttp.ClientTimeout(total=8)) as r:
+                        STATE["reachable"] = r.status == 200
+                except Exception:
+                    STATE["reachable"] = False
+                fails = 0 if STATE["reachable"] else fails + 1
+                busy = any(c.status != "done" and time.time() - c.created < 1200 for c in SESSIONS.values())
+                if fails >= 3 and not busy:
+                    log("tunnel unreachable; starting a new one")
+                    if STATE["proc"]:
+                        STATE["proc"].terminate()
+                    STATE["proc"] = await asyncio.get_running_loop().run_in_executor(None, start_tunnel)
+                    fails = 0
+                await asyncio.sleep(60 if STATE["reachable"] else 20)
+    app["tunnel_watch"] = asyncio.create_task(loop())
 
 
 def start_tunnel():
@@ -347,14 +374,16 @@ def start_tunnel():
 
 
 def main():
-    tunnel = start_tunnel()
+    STATE["proc"] = start_tunnel()
     app = web.Application()
+    app.on_startup.append(watch_tunnel)
     app.add_routes([web.get("/media", media), web.post("/telnyx", webhook), web.post("/dial", dial),
                     web.get("/result/{sid}", result), web.get("/health", health)])
     try:
         web.run_app(app, host="127.0.0.1", port=PORT, print=None)
     finally:
-        tunnel.terminate()
+        if STATE["proc"]:
+            STATE["proc"].terminate()
 
 
 if __name__ == "__main__":

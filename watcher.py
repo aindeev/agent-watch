@@ -178,12 +178,13 @@ def needs():
         # the user wrote to this agent in the last half hour: they're in that chat already, so a call would interrupt them
         elif any(not from_me(m) and time.time()-iso_epoch(t)<ENGAGED_S for t,m in r['users'][-3:]):continue
         elif complete and parked:continue
+        # on hold ("Later", or the coordinator knows the user is on it): no calls about it, finished or waiting,
+        # until the user writes to it or the hold expires
+        elif held_since(sid) and not any(t>held_since(sid) and not from_me(m) for t,m in r['users']):continue
         elif complete:
             if quiet<300 or bg or EXTERNAL_WAIT.search(sm.get('doing') or ''):continue   # "done" but still waiting on CI etc.
             kind,need='finished',f"It has finished. What it did: {'; '.join(sm.get('done') or [])}. What should it do next?"
         elif parked:continue          # told to stop: stay quiet about finished/idle until it gets new work
-        elif held_since(sid) and not any(t>held_since(sid) and not from_me(m) for t,m in r['users']) and sm.get('waiting_on_you'):
-            continue                  # its question is already on the user's list: no re-asks until they reply
         # a decision the user owes stays owed even while the agent keeps busy with background retries
         elif sm.get('waiting_on_you') and quiet>180:kind,need='waiting',sm['waiting_on_you']
         # quiet but waiting on something external (CI, a merge queue, a deploy, a retry loop) isn't stuck

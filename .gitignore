@@ -1,0 +1,36 @@
+# runtime state, logs and call transcripts
+# secrets and personal config
+*.bak*
+*.err
+*.log
+*.pid
+.env
+.paseo-test/
+__pycache__/
+call_status.json
+calls/
+dashboard/index.html
+dashboard/index.html.tmp
+dashboard/state.json
+dashboard/state.json.tmp
+dashboard/summaries.json
+dashboard/summaries.json.tmp
+decisions/
+needs.json
+needs.json.tmp
+node_modules/
+quiet_override_until
+quiet_until
+resources.json
+resources.log
+sessions.json
+state.json
+state.json.tmp
+voice/*.log
+voice/*.out
+voice/*.pid
+voice/.venv/
+voice/models/
+voice/recordings/
+menubar/.build/
+peers/

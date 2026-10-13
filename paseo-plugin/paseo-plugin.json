@@ -1,0 +1,15 @@
+{
+  "id": "agent-watch",
+  "name": "Agent watch",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.11.0"
+  },
+  "build": [
+    [
+      "npm",
+      "ci",
+      "--omit=dev"
+    ]
+  ]
+}

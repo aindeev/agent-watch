@@ -1,0 +1,9 @@
+[
+  {
+    "session_id": "00000000-0000-0000-0000-000000000000",
+    "title": "Checkout redesign",
+    "plan": "Ship the new checkout in 4 PRs behind the checkout_v2 flag, then watch production for a day.",
+    "cwd": "/Users/you/code/shop",
+    "links": ["/Users/you/code/shop/.local/checkout-progress.html"]
+  }
+]

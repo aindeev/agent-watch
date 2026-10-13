@@ -43,18 +43,24 @@ def el(method,path,body=None):
 def bridge(method,path,body=None):
     req=urllib.request.Request(BRIDGE+path,json.dumps(body).encode() if body else None,{'Content-Type':'application/json'},method=method)
     return json.load(urllib.request.urlopen(req,timeout=30))
-def call_cli(op,inp,timeout=60):
+class CallMayHaveStarted(RuntimeError):
+    """The calling CLI couldn't say whether the call went out (its 'unknown outcome'): never dial again elsewhere."""
+
+def call_cli(op,inp,timeout=60,key=None):
     """Runs one op of the external calling CLI: `<CALL_CLI> <op> --input '<json>' --json --no-input`, which must print
     {"ok": true, "data": {...}} (or {"ok": false, "error": {"code", "message"}} with a non-zero exit). Returns data."""
     import shlex,shutil,subprocess
     cmd=shlex.split(ENV.get('CALL_CLI',''))
     if not cmd or not shutil.which(cmd[0]):raise FileNotFoundError('no calling CLI installed')
-    r=subprocess.run(cmd+[op,'--input',json.dumps(inp),'--json','--no-input'],capture_output=True,text=True,timeout=timeout)
+    extra=['--idempotency-key',key] if key else []
+    r=subprocess.run(cmd+[op,'--input',json.dumps(inp),'--json','--no-input']+extra,capture_output=True,text=True,timeout=timeout)
     try:out=json.loads(r.stdout or '{}')
     except Exception:out={}
     if r.returncode!=0 or not out.get('ok'):
         err=(out.get('error') or {})
-        raise RuntimeError(f"{op}: {err.get('code') or r.returncode} {err.get('message') or r.stderr.strip()[:200]}")
+        msg=f"{op}: {err.get('code') or r.returncode} {err.get('message') or r.stderr.strip()[:200]}"
+        if err.get('code')=='unknown_outcome':raise CallMayHaveStarted(msg)
+        raise RuntimeError(msg)
     return out.get('data') or {}
 
 CLI_PLACE=ENV.get('CALL_CLI_PLACE','calls.place')   # op that places a call: {agentId, toNumber, dynamicVariables} -> {conversationId}
@@ -192,12 +198,20 @@ def call(items):
     # the opening line reads the first item itself, so there's no silent gap waiting for the listener to speak
     first=items[0]
     intro=('One of your agents needs you. ' if len(items)==1 else f'{len(items)} of your agents need you. First, ')+f"{first['title']}. {first['need']}"
-    variables={'items':'\n'.join(lines),'intro':intro}
+    variables={'items':'\n'.join(lines),'intro':intro,'user_name':USER}
     if cli_ready():
+        import uuid
+        key=str(uuid.uuid4())   # the same key on a retry can never dial twice
         try:
-            r=call_cli(CLI_PLACE,{'agentId':cli_agent(),'toNumber':TO,'dynamicVariables':variables})
+            try:r=call_cli(CLI_PLACE,{'agentId':cli_agent(),'toNumber':TO,'dynamicVariables':variables},key=key)
+            except CallMayHaveStarted:
+                time.sleep(5)
+                r=call_cli(CLI_PLACE,{'agentId':cli_agent(),'toNumber':TO,'dynamicVariables':variables},key=key)
             log('CALL cli',json.dumps(r),'\n'+'\n'.join(lines))
             return 'cli:'+r['conversationId']
+        except CallMayHaveStarted as e:
+            # the phone may be ringing already: don't call again through local keys; the item is retried later
+            raise RuntimeError(f'calling CLI could not confirm the call ({e}); not dialling again now')
         except Exception as e:
             # no access, not signed in, or the service is down: use local keys, and don't retry the CLI for 30 min
             CLI_UNAVAILABLE_UNTIL[0]=time.time()+1800

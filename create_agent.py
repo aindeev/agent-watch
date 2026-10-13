@@ -1,7 +1,10 @@
 # Creates (or updates) the ElevenLabs voice agent that phones the user when their Claude sessions need them.
 import json,os,urllib.request,urllib.error
 import config,voice_config
-env=config.ENV;NAME=config.USER_NAME
+env=config.ENV
+# The person's name is a per-call variable, so one agent can phone anyone (e.g. a team's shared agent behind a
+# calling CLI); the watcher fills {{user_name}} on every call.
+NAME='{{user_name}}'
 KEY=env['ELEVENLABS_API_KEY']
 PROMPT=f'''You are {NAME}'s agent coordinator. {NAME} runs several Claude Code agents at once. You are calling them because some of their agents need them.
 
@@ -21,12 +24,12 @@ How to run the call:
 - Keep it brisk: they're busy. No small talk, no reading of IDs or long PR lists.
 - When every item has an answer (or they want to stop), say you'll pass it all on, then end the call.'''
 DATA={"answers":{"type":"string","description":"JSON array, one object per item discussed: {\"item\": <item number>, \"instruction\": \"{NAME}'s answer rewritten as a clear, complete instruction to send to that agent, in their words where possible. For a [question] item, start with the exact label of the option they chose (or \\\"None of the options:\\\" if they chose none) followed by any extra direction. For a [permission] item, start with Allow or Deny\", \"skip\": true|false}. Only include items they actually answered or explicitly skipped."}}
-DATA['answers']['description']=DATA['answers']['description'].replace('{NAME}',NAME)
-body={"name":f"Agent Coordinator (calls {NAME})",
+DATA['answers']['description']=DATA['answers']['description'].replace("{NAME}'s",'their')
+body={"name":"Agent Coordinator",
  "conversation_config":{
   "agent":{"first_message":f"Hi {NAME}, it's your agent coordinator. {{{{intro}}}}","language":"en",
    "prompt":{"prompt":PROMPT,"built_in_tools":{"end_call":{"name":"end_call","description":f"End the call once every item is answered or {NAME} wants to stop.","params":{"system_tool_type":"end_call"}}}},
-   "dynamic_variables":{"dynamic_variable_placeholders":{"items":"1. (test) Example agent: needs a yes/no.","intro":"One agent needs you."}}},
+   "dynamic_variables":{"dynamic_variable_placeholders":{"items":"1. (test) Example agent: needs a yes/no.","intro":"One agent needs you.","user_name":"Alex"}}},
   "conversation":{"max_duration_seconds":600}},
  "platform_settings":{"data_collection":DATA}}
 voice_config.apply(body['conversation_config'])

@@ -398,7 +398,12 @@ def run_call(items,st):
         emit('RELAY '+json.dumps(dict(to=it['name'],paseo_id=it['paseo_id'],title=it['title'],kind=it['kind'],instruction=a.get('instruction',''))))
     open(f'{HERE}/calls/{cid}.txt','w').write(transcript(c)) if c else None
     missed=[it for it in items if it['sid'] not in got]
-    if missed:emit(f"NO-ANSWER for {', '.join(i['name'] for i in missed)} (call status {(c or {}).get('status','timeout')}; transcript calls/{cid}.txt); will retry in {RETRY_AFTER//60} min")
+    if missed:
+        last=[i['name'] for i in missed if (st['items'].get(i['sid']) or {}).get('tries',0)>=MAX_TRIES]
+        more=[i['name'] for i in missed if i['name'] not in last]
+        emit(f"NO-ANSWER for {', '.join(i['name'] for i in missed)} (call status {(c or {}).get('status','timeout')}; transcript calls/{cid}.txt); "
+             +'; '.join(([f"will retry {', '.join(more)} in {RETRY_AFTER//60} min"] if more else [])
+                        +([f"no more calls about {', '.join(last)} (tried {MAX_TRIES} times; still in Needs you)"] if last else [])))
     save_state(st)
 
 def main():
